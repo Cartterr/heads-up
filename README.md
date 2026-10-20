@@ -14,8 +14,8 @@ types out what was said.
   streaming in about a second.
 - **The notch.** Pure black, flush with the top edge, concave ears, rounded bottom corners. Width and height are
   springs integrated against the real frame time, so the motion is the same at 60 Hz and runs at the full refresh
-  rate of fast panels (measured **499.7 fps average, 2.2 ms p99 frame time** on a 499 Hz OLED). Words ease in as
-  they are spoken, and a little waveform reacts to the actual audio.
+  rate of fast panels (measured **499.7 fps average, 2.2 ms p99 frame time** on a 499 Hz OLED). Each word fades in
+  about 0.25 s **before** it is spoken, and a little waveform reacts to the actual audio.
 - **A queue.** Several agents talking at once never overlap; lines are spoken one after another.
 - **Safe by default.** Your key never touches the repo, the overlay loads only a local file, hooks never fail loudly.
 
@@ -115,7 +115,12 @@ agent ──▶ heads-up CLI ──▶ OpenAI Realtime (WebSocket)
 ```
 
 - The CLI streams audio and transcript chunks to the daemon as they arrive. The daemon plays them back to back on
-  the audio clock (sample-accurate, no gaps) and reveals words at the pace of the speech.
+  the audio clock (sample-accurate, no gaps).
+- **Word timing.** The API gives no word timestamps, so [`overlay/align.cjs`](overlay/align.cjs) works them out from
+  the audio: commas, colons and dashes snap to the real pauses in the speech, and inside each phrase words share the
+  voiced time by length. Against Whisper word timestamps on 75 words it had about 0.21 s of jitter, so with a 0.25 s
+  lead roughly 97% of words appear before they are heard (mean 0.33 s ahead). Until the whole line has arrived (the
+  first second or so) it falls back to a flat 16 characters per second.
 - The notch is one canvas drawn every animation frame; there is no CSS animation and no fixed frame budget.
 - Without Electron (or with `--no-notch`) it falls back to audio only: Windows `SoundPlayer`, macOS `afplay`,
   Linux `aplay`. Only Windows is tested. On macOS and Linux the notch overlay is untested.

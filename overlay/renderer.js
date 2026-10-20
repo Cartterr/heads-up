@@ -6,6 +6,7 @@ const { ipcRenderer } = require('electron');
 const net = require('node:net');
 const fs = require('node:fs');
 const path = require('node:path');
+const { align } = require('./align.cjs');
 
 const PIPE = process.env.HEADSUP_PIPE;
 const DEBUG = process.env.HEADSUP_DEBUG_DIR; // set it to get notch.png + stats.json (measured fps) written there
@@ -13,6 +14,7 @@ const W = 760, H = 300, CX = W / 2;
 const FONT = '500 17px "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif';
 const LH = 24, PADX = 24, PADY = 13, BARS = 52, TEXT_MAX = 400; // layout, px
 const HOLD = 1400, FADE = 220, IDLE_QUIT = 30 * 60_000; // ms
+const LEAD = 0.25, HOP = 240, VOICED = 0.01; // word reveal lead (s); 10 ms hop at 24 kHz; RMS above this counts as voice
 
 const cv = document.getElementById('c');
 const dpr = window.devicePixelRatio || 1;
@@ -40,6 +42,14 @@ function feed(u) {
   while (u.chunks.length) {
     const bin = atob(u.chunks.shift()), n = bin.length >> 1, f = new Float32Array(n);
     for (let i = 0; i < n; i++) { const s = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8); f[i] = (s > 32767 ? s - 65536 : s) / 32768; }
+    for (let i = 0; i < n; i += HOP) { // 10 ms hops: where each starts and how much of it carries voice (drives word timing)
+      const m = Math.min(HOP, n - i);
+      let s = 0;
+      for (let j = 0; j < m; j++) s += f[i + j] * f[i + j];
+      u.hops.push({ t: (u.samples + i) / 24000, v: Math.sqrt(s / m) > VOICED ? m / 24000 : 0 });
+    }
+    u.samples += n;
+    if (DEBUG) u.pcm.push(f);
     const b = ac.createBuffer(1, n, 24000); b.copyToChannel(f, 0);
     const src = ac.createBufferSource(); src.buffer = b; src.connect(an);
     const t = Math.max(ac.currentTime + 0.06, u.nextT); src.start(t);
@@ -66,7 +76,7 @@ function pump() {
 if (process.platform !== 'win32') { try { fs.unlinkSync(PIPE); } catch { /* no stale socket */ } }
 net.createServer((sock) => {
   const u = { sock, queued: false, text: '', chunks: [], ended: false, audioDur: 0, playStart: null, nextT: 0, finished: false,
-    dirty: true, words: [], pos: [], cum: [], shownAt: [], nLines: 1, textW: 0 };
+    dirty: true, words: [], pos: [], cum: [], shownAt: [], nLines: 1, textW: 0, hops: [], samples: 0, shown: 0, wordT: null, pcm: [] };
   let buf = '';
   sock.setEncoding('utf8');
   sock.on('data', (d) => {
@@ -83,27 +93,39 @@ function layout(u) {
   g.font = FONT;
   const sp = g.measureText(' ').width;
   let line = 0, x = 0, maxW = 0, total = 0;
-  u.words = u.text.split(/\s+/).filter(Boolean);
+  const toks = [...u.text.matchAll(/(\S+?[—–])(?=\S)|\S+/g)]; // an em dash glued between words ("three—please") ends its word
+  u.words = toks.map((m) => m[0]);
   u.cum = [];
-  u.pos = u.words.map((w) => {
-    const ww = g.measureText(w).width;
-    if (x > 0 && x + ww > TEXT_MAX) { maxW = Math.max(maxW, x - sp); line++; x = 0; }
+  let gap = 0; // space after the previous word (none after a glued dash)
+  u.pos = toks.map((m) => {
+    const w = m[0], ww = g.measureText(w).width;
+    if (x > 0 && x + ww > TEXT_MAX) { maxW = Math.max(maxW, x - gap); line++; x = 0; }
     const p = { w, line, x };
-    x += ww + sp; total += w.length + 1; u.cum.push(total);
+    gap = m[1] !== undefined ? 0 : sp;
+    x += ww + gap; total += w.length + 1; u.cum.push(total);
     return p;
   });
-  u.nLines = line + 1; u.textW = Math.max(maxW, x - sp, 0); u.dirty = false;
+  u.nLines = line + 1; u.textW = Math.max(maxW, x - gap, 0); u.dirty = false;
 }
-// ponytail: reveal pace is estimated from characters per second of audio (the API gives no word timestamps).
-// Upgrade path: switch to a transcription model with word timings if the estimate ever drifts noticeably.
+// Each word is revealed LEAD seconds before it is heard, so it has finished fading in by the time it is spoken.
 function shownCount(u) {
   if (u.finished || u.collapsing) return u.words.length;
-  if (u.playStart === null || ac.currentTime < u.playStart) return 0;
-  const total = u.cum[u.cum.length - 1] || 1, cps = u.ended && u.audioDur ? total / u.audioDur : 15;
-  const spoken = (ac.currentTime - u.playStart) * cps;
-  let n = 0;
-  while (n < u.words.length && u.cum[n] - 2 <= spoken) n++;
-  return n;
+  if (u.playStart === null) return 0;
+  const el = ac.currentTime - (ac.outputLatency || 0) - u.playStart + LEAD; // where the ear is now, plus the lead
+  if (u.ended && u.wordT?.length !== u.words.length) u.wordT = align(u.words, u.hops);
+  let n = u.shown;
+  if (u.wordT) while (n < u.words.length && u.wordT[n] <= el) n++;
+  else while (n < u.words.length && 0.1 + (u.cum[n] - u.words[n].length - 1) / 16 <= el) n++; // still streaming: ~16 chars/s guess
+  return (u.shown = n);
+}
+function dump(u) { // HEADSUP_DEBUG_DIR only: raw audio + our word times, so the timing can be checked against a transcriber
+  const f = new Int16Array(u.pcm.reduce((a, c) => a + c.length, 0));
+  let o = 0;
+  for (const c of u.pcm) for (let i = 0; i < c.length; i++) f[o++] = Math.max(-32768, Math.min(32767, Math.round(c[i] * 32768)));
+  fs.writeFileSync(path.join(DEBUG, 'speech.pcm'), Buffer.from(f.buffer));
+  const cps = u.cum[u.cum.length - 1] / u.audioDur; // what the old chars-per-second reveal used
+  fs.writeFileSync(path.join(DEBUG, 'align.json'), JSON.stringify({ words: u.words, wordT: u.wordT, lead: LEAD,
+    oldT: u.words.map((_, i) => (u.cum[i] - 2) / cps) }, null, 1));
 }
 function targets(u) {
   if (!u || u.collapsing) return [120, 0];
@@ -148,9 +170,9 @@ function draw(now) {
     g.font = FONT; g.textBaseline = 'middle'; g.fillStyle = '#fff';
     for (let i = 0; i < n; i++) {
       u.shownAt[i] ??= now;
-      const a = Math.min(1, (now - u.shownAt[i]) / 200), e = 1 - (1 - a) ** 3; // each word eases in, rising 6 px
+      const a = Math.min(1, (now - u.shownAt[i]) / 150), e = 1 - (1 - a) ** 3; // each word eases in, rising 5 px
       g.globalAlpha = e * fade;
-      g.fillText(u.pos[i].w, x0 + u.pos[i].x, y0 + (u.pos[i].line + 0.5) * LH + (1 - e) * 6);
+      g.fillText(u.pos[i].w, x0 + u.pos[i].x, y0 + (u.pos[i].line + 0.5) * LH + (1 - e) * 5);
     }
     g.globalAlpha = 1;
     u.allShown = n === u.words.length;
@@ -183,6 +205,7 @@ function frame(now) {
     if (u.dirty) layout(u);
     if (!u.finished && u.ended && !u.chunks.length && (u.playStart === null || ac.currentTime >= u.nextT)) {
       u.finished = true; u.finishedAt = now;
+      if (DEBUG && u.wordT) dump(u);
       try { u.sock.write('{"type":"done"}\n'); } catch { /* client already gone */ }
     }
     if (u.finished && !u.collapsing && now - u.finishedAt > HOLD) {
