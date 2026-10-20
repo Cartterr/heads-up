@@ -6,11 +6,17 @@ import { join } from 'node:path';
 export const DEFAULT_MODEL = 'gpt-realtime-2.1';
 export const DEFAULT_VOICE = 'marin';
 export const PERSONA =
-  "You are the voice of the user's AI coding assistant: a warm, foul-mouthed best friend. You get a short heads-up " +
+  "You are the voice of the user's AI coding assistants: a warm, foul-mouthed best friend. You get a short heads-up " +
   "about something about to happen on the user's computer, or something that needs them. Say it out loud in ONE " +
-  "short sentence (under 18 words) with friendly, affectionate swearing (fuck, shit, damn, hell, ass; never insults " +
+  "short sentence (under 20 words) with friendly, affectionate swearing (fuck, shit, damn, hell, ass; never insults " +
   "aimed at the user, no slurs). Keep the real information clear. Answer in the language of the heads-up. Never " +
-  "read it verbatim, never add greetings or extra commentary.";
+  "read it verbatim, never add greetings or extra commentary. " +
+  "You also remember the recent heads-ups listed in the message, so be reactive, never repetitive: if the same thing " +
+  "keeps happening, tease or comment instead of announcing it again ('damn, the computer again, huh?', 'okay, second " +
+  "screenshot in a minute'); if it was a long time ago, or different, announce it plainly. Several sessions (each has " +
+  "a title) may be talking to the user: name the session in a few words ONLY when it differs from the previous " +
+  "heads-up's session or when it helps the user know which window to look at. Never read a title out in full: " +
+  "shorten it to its 2-3 key words, like a nickname ('the Gatebots session', 'the TTS one').";
 
 // Key lookup order: HEADSUP_KEY_FILE, OPENAI_API_KEY, ~/.heads-up/key. The key is never logged or echoed.
 export function resolveKey(env = process.env) {
@@ -23,7 +29,7 @@ export function resolveKey(env = process.env) {
 }
 
 /** Resolves once the full line has streamed. onAudio gets base64 PCM16 chunks, onText gets transcript deltas. */
-export function realtime(text, { key, model = DEFAULT_MODEL, voice = DEFAULT_VOICE, persona = PERSONA, onAudio, onText }) {
+export function realtime(text, { key, model = DEFAULT_MODEL, voice = DEFAULT_VOICE, persona = PERSONA, session, context = '', onAudio, onText }) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket('wss://api.openai.com/v1/realtime?model=' + encodeURIComponent(model), {
       headers: { Authorization: 'Bearer ' + key },
@@ -45,7 +51,7 @@ export function realtime(text, { key, model = DEFAULT_MODEL, voice = DEFAULT_VOI
         send({ type: 'session.update', session: { type: 'realtime', instructions: persona, output_modalities: ['audio'],
           audio: { output: { voice, format: { type: 'audio/pcm', rate: 24000 } } } } });
         send({ type: 'conversation.item.create', item: { type: 'message', role: 'user',
-          content: [{ type: 'input_text', text: 'Heads-up to announce: ' + text }] } });
+          content: [{ type: 'input_text', text: context + 'Heads-up to announce' + (session ? ` (from session "${session}")` : '') + ': ' + text }] } });
         send({ type: 'response.create' });
       } else if (/^response\.(output_)?audio\.delta$/.test(e.type)) {
         gotAudio = true; onAudio?.(e.delta);

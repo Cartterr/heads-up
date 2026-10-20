@@ -6,7 +6,8 @@ import { spawn } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { adapters } from './adapters.mjs';
+import { adapters, sessions, claudeSession } from './adapters.mjs';
+import { record } from './history.mjs';
 import { speak } from './speak.mjs';
 import { openNotch } from './notch.mjs';
 
@@ -20,6 +21,7 @@ const HELP = `heads-up "<what to say>"   speak a heads-up (the voice model words
   --voice <name>      voice (default marin, env HEADSUP_VOICE)
   --model <id>        Realtime model (default gpt-realtime-2.1, env HEADSUP_MODEL)
   --persona "<text>"  replace the system prompt, e.g. a polite butler (env HEADSUP_PERSONA)
+  --session "<title>"  which session/agent is speaking, so the voice can tell them apart (env HEADSUP_SESSION; Claude Code is detected)
   --start             start the overlay daemon now (kept alive until --stop) and exit; run it at logon
   --stop              close the overlay daemon
 
@@ -30,7 +32,7 @@ const { values: v, positionals } = parseArgs({
   options: {
     help: { type: 'boolean', short: 'h' }, start: { type: 'boolean' }, wait: { type: 'boolean' }, detach: { type: 'boolean' }, stop: { type: 'boolean' },
     'no-notch': { type: 'boolean' }, hook: { type: 'string' }, debounce: { type: 'string' },
-    voice: { type: 'string' }, model: { type: 'string' }, persona: { type: 'string' },
+    voice: { type: 'string' }, model: { type: 'string' }, persona: { type: 'string' }, session: { type: 'string' },
   },
 });
 
@@ -61,23 +63,26 @@ if (v.stop) {
 }
 
 try {
-  let text = positionals.join(' '), key = null, seconds = 45;
+  let text = positionals.join(' '), key = null, seconds = 45, session = v.session ?? process.env.HEADSUP_SESSION ?? null;
   if (v.hook) {
     const adapt = adapters[v.hook];
     if (!adapt) throw new Error('unknown agent for --hook: ' + v.hook);
-    [key, text] = adapt(JSON.parse(readFileSync(0, 'utf8')));
+    const payload = JSON.parse(readFileSync(0, 'utf8'));
+    [key, text] = adapt(payload);
+    session ??= sessions[v.hook]?.(payload)?.title ?? null;
   } else if (v.debounce) {
     let s; [key, s] = v.debounce.split(':'); seconds = Number(s) || 45;
   }
   if (!text) { console.error(HELP); process.exit(1); }
-  if (key && debounced(key, seconds)) process.exit(0);
+  session ??= claudeSession()?.title ?? null; // plain calls from a Claude Code session
+  if (key && debounced(key, seconds)) { record({ ts: Date.now(), session, event: text, silent: true }); process.exit(0); }
 
   const opts = {
-    notch: !v['no-notch'], wait: v.wait,
+    notch: !v['no-notch'], wait: v.wait, session,
     voice: v.voice ?? process.env.HEADSUP_VOICE, model: v.model ?? process.env.HEADSUP_MODEL, persona: v.persona ?? process.env.HEADSUP_PERSONA,
   };
   if (v.detach || (v.hook && !v.wait)) { // hooks must return instantly unless the agent should wait for the speech
-    const pass = ['voice', 'model', 'persona'].flatMap((k) => (v[k] ? ['--' + k, v[k]] : [])).concat(v['no-notch'] ? ['--no-notch'] : []);
+    const pass = ['voice', 'model', 'persona'].flatMap((k) => (v[k] ? ['--' + k, v[k]] : [])).concat(session ? ['--session', session] : []).concat(v['no-notch'] ? ['--no-notch'] : []);
     spawn(process.execPath, [fileURLToPath(import.meta.url), ...pass, text], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
     process.exit(0);
   }

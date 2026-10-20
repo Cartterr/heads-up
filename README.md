@@ -36,6 +36,7 @@ heads-up --wait "about to record your screen"
 | 🪟 **A buttery notch** | Pure black, flush with the top edge, concave ears, rounded bottom corners. Springs integrated against real frame time: the same motion at 60 Hz, and **499.7 fps average (2.2 ms p99)** on a 499 Hz OLED. |
 | ⏱️ **Words before the voice** | Each word fades in about 0.25 s *before* it is spoken, timed on the real audio's pauses. |
 | 🔌 **Any agent** | It's a CLI. Claude Code, Codex, Gemini CLI, Aider, OpenCode, cron, shell scripts. A Claude Code hook adapter is built in. |
+| 🧠 **It remembers** | It knows what it said recently, and which session said it, so it reacts instead of repeating itself: *"Damn, it's grabbing your mouse again, same shit, different moment."* Session titles are picked up automatically in Claude Code. |
 | 🚦 **A queue** | Several agents talking at once never overlap. Lines play one after another, gapless. |
 | 🛡️ **Safe by default** | Your key never touches the repo, the overlay loads one local file under a strict CSP, hooks never fail loudly. |
 
@@ -129,6 +130,7 @@ heads-up "<what to say>"
   --model <id>        Realtime model (default gpt-realtime-2.1, env HEADSUP_MODEL)
   --persona "<text>"  replace the system prompt (env HEADSUP_PERSONA)
   --start             start the overlay daemon now (kept alive until --stop) and exit; run it at logon
+  --session "<title>"  which session/agent is speaking, so the voice can tell them apart (env HEADSUP_SESSION)
   --stop              close the overlay daemon
 ```
 
@@ -165,11 +167,19 @@ agent ──▶ heads-up CLI ──▶ OpenAI Realtime (WebSocket)
 - **No Electron?** It falls back to audio only: Windows `SoundPlayer`, macOS `afplay`, Linux `aplay`. Only Windows is
   tested; the notch on macOS and Linux is untested.
 
+### 🧠 Memory and sessions
+
+Every heads-up (and every one the debounce silenced) is logged to `~/.heads-up/history.jsonl` (last 100). The most recent
+ten from the past two hours go to the voice model with each new line, so it can tease a repeat or announce something
+plainly after a long gap. Claude Code sessions are identified from the hook payload (or `CLAUDE_CODE_SESSION_ID`) and
+titled from the session's transcript; other agents pass `--session "<title>"` or set `HEADSUP_SESSION`. The model
+nickname-shortens titles and names the session only when it changes. Delete the file to forget everything.
+
 ## 🔒 Security and privacy
 
 - The API key is read from your env or a file you point at. It is never logged, printed or sent anywhere except
   OpenAI. The repo ignores `.env`, `*.key` and `openaikey*`.
-- The text you pass, and what the model says back, go to OpenAI. Don't pipe secrets through it.
+- The text you pass, what the model says back, session titles and your last ten heads-ups go to OpenAI, and the history stays in `~/.heads-up/` on your machine. Don't pipe secrets through it.
 - The daemon listens on a local named pipe (`\\.\pipe\heads-up-<user>` on Windows, a socket in the temp dir
   elsewhere). Any local process of yours can make it speak; that's all it can do.
 - The overlay window loads only its own `index.html` under a strict CSP. It has Node access for the socket and

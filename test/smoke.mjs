@@ -1,10 +1,11 @@
 // Offline smoke test: hook mapping and key lookup. Run with `npm test`. Makes no network calls.
 import assert from 'node:assert/strict';
-import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
-import { claudeCode } from '../src/adapters.mjs';
+import { claudeCode, claudeSession, lastTitle } from '../src/adapters.mjs';
+import { describe } from '../src/history.mjs';
 import { resolveKey } from '../src/voice.mjs';
 
 const { align } = createRequire(import.meta.url)('../overlay/align.cjs');
@@ -34,5 +35,20 @@ assert.equal(resolveKey({ HEADSUP_KEY_FILE: file, OPENAI_API_KEY: 'sk-from-env' 
 assert.equal(resolveKey({ HEADSUP_KEY_FILE: join(dir, 'missing'), OPENAI_API_KEY: 'sk-from-env' }), 'sk-from-env');
 assert.throws(() => resolveKey({ HEADSUP_KEY_FILE: join(dir, 'missing') }), /No OpenAI key/);
 rmSync(dir, { recursive: true });
+
+// session titles: the last customTitle in a transcript wins, with escapes decoded; no transcript falls back to the folder name
+const transcript = join(mkdtempSync(join(tmpdir(), 'heads-up-test-')), 's.jsonl');
+writeFileSync(transcript, '{"type":"custom-title","customTitle":"Old name"}\n{"type":"x"}\n{"type":"custom-title","customTitle":"Fix \\"notch\\" lag"}\n');
+assert.equal(lastTitle(readFileSync(transcript, 'utf8')), 'Fix "notch" lag');
+assert.equal(claudeSession({ session_id: 'abc', transcript_path: transcript }).title, 'Fix "notch" lag');
+assert.equal(claudeSession({ session_id: 'no-such-session', cwd: 'C:\\work\\my-app' }).title, 'my-app');
+assert.equal(claudeSession({}, {}), null);
+
+// history block for the model: relative times, session titles, quiet events marked
+const now = 1_000_000_000;
+const block = describe([{ ts: now - 20_000, session: 'A', event: 'screenshot', said: 'say cheese' }, { ts: now - 5 * 60_000, event: 'mouse', silent: true }], now);
+assert.match(block, /20 s ago, session "A": screenshot -> you said: "say cheese"/);
+assert.match(block, /5 min ago: mouse \(you stayed quiet\)/);
+assert.equal(describe([], now), '');
 
 console.log('smoke test passed');

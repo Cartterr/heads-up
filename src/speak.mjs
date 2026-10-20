@@ -5,24 +5,28 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { realtime, resolveKey } from './voice.mjs';
 import { openNotch } from './notch.mjs';
+import { record, recent, describe } from './history.mjs';
 
 const MAX_CHARS = 300; // keeps a runaway agent from burning credits on a speech
 
-export async function speak(text, { notch = true, wait = false, ...voice } = {}) {
+export async function speak(text, { notch = true, wait = false, session, ...voice } = {}) {
   text = text.slice(0, MAX_CHARS);
   const key = resolveKey();
   const linkP = (notch ? openNotch() : Promise.resolve(null)).catch(() => null);
   const pcm = []; // kept so we can still speak if the overlay isn't available
+  let said = '';
+  const context = describe(recent());
   try {
     await realtime(text, {
-      key, ...voice,
+      key, ...voice, session, context,
       onAudio: (b64) => { pcm.push(Buffer.from(b64, 'base64')); linkP.then((l) => l?.send({ type: 'audio', b64 })); },
-      onText: (delta) => linkP.then((l) => l?.send({ type: 'text', delta })),
+      onText: (delta) => { said += delta; linkP.then((l) => l?.send({ type: 'text', delta })); },
     });
   } catch (e) {
     await (await linkP)?.close();
     throw e;
   }
+  record({ ts: Date.now(), session, event: text, said: said.trim() });
   const link = await linkP;
   if (!link) return playNative(Buffer.concat(pcm));
   link.send({ type: 'end' });
