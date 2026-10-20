@@ -20,6 +20,7 @@ const HELP = `heads-up "<what to say>"   speak a heads-up (the voice model words
   --voice <name>      voice (default marin, env HEADSUP_VOICE)
   --model <id>        Realtime model (default gpt-realtime-2.1, env HEADSUP_MODEL)
   --persona "<text>"  replace the system prompt, e.g. a polite butler (env HEADSUP_PERSONA)
+  --start             start the overlay daemon now (kept alive until --stop) and exit; run it at logon
   --stop              close the overlay daemon
 
 Key: OPENAI_API_KEY, or HEADSUP_KEY_FILE=<path>, or ~/.heads-up/key`;
@@ -27,7 +28,7 @@ Key: OPENAI_API_KEY, or HEADSUP_KEY_FILE=<path>, or ~/.heads-up/key`;
 const { values: v, positionals } = parseArgs({
   allowPositionals: true,
   options: {
-    help: { type: 'boolean', short: 'h' }, wait: { type: 'boolean' }, detach: { type: 'boolean' }, stop: { type: 'boolean' },
+    help: { type: 'boolean', short: 'h' }, start: { type: 'boolean' }, wait: { type: 'boolean' }, detach: { type: 'boolean' }, stop: { type: 'boolean' },
     'no-notch': { type: 'boolean' }, hook: { type: 'string' }, debounce: { type: 'string' },
     voice: { type: 'string' }, model: { type: 'string' }, persona: { type: 'string' },
   },
@@ -46,6 +47,12 @@ function debounced(key, seconds) {
 }
 
 if (v.help) { console.log(HELP); process.exit(0); }
+if (v.start) { // the daemon idles at ~0 CPU and costs no API tokens: only speaking does
+  process.env.HEADSUP_IDLE_MIN ??= '0';
+  const link = await openNotch();
+  await link?.close();
+  process.exit(link ? 0 : 1);
+}
 if (v.stop) {
   const link = await openNotch({ start: false });
   link?.send({ type: 'quit' });

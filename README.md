@@ -102,6 +102,20 @@ announces once (debounced 45 s per kind). The adapter never exits non-zero, so a
 Another agent with hooks? Add a function to [`src/adapters.mjs`](src/adapters.mjs) that maps its payload to
 `[debounce key, text]`, or just call `heads-up "text"` from its hook.
 
+## 🔁 Always on (survives reboots)
+
+The daemon costs nothing while silent: about 0.5% of one core, a few hundred MB of RAM for the hidden Electron
+window, and **zero API tokens**. Only speaking is billed. Start it at logon so the first line is instant:
+
+```powershell
+# Windows: a hidden logon task (adjust the paths)
+$a = New-ScheduledTaskAction -Execute (Get-Command node).Source -Argument '"C:path	oheads-upsrccli.mjs" --start'
+Register-ScheduledTask -TaskName 'heads-up overlay' -Action $a -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME) `
+  -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden) -RunLevel Limited
+```
+
+`--start` keeps the daemon alive until `--stop`. If it ever dies, the next `heads-up` call restarts it.
+
 ## 🎛️ CLI
 
 ```
@@ -114,11 +128,12 @@ heads-up "<what to say>"
   --voice <name>      voice (default marin, env HEADSUP_VOICE)
   --model <id>        Realtime model (default gpt-realtime-2.1, env HEADSUP_MODEL)
   --persona "<text>"  replace the system prompt (env HEADSUP_PERSONA)
+  --start             start the overlay daemon now (kept alive until --stop) and exit; run it at logon
   --stop              close the overlay daemon
 ```
 
 Lines are capped at 300 characters. The overlay daemon starts on first use, queues speech and quits itself after 30
-idle minutes.
+idle minutes (`HEADSUP_IDLE_MIN=0` to never quit).
 
 ### 🎭 Personas
 

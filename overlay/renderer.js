@@ -14,7 +14,7 @@ const RECORD = process.env.HEADSUP_RECORD_DIR; // set it to dump timestamped fra
 const W = 760, H = 300, CX = W / 2;
 const FONT = '500 17px "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif';
 const LH = 24, PADX = 24, PADY = 13, BARS = 52, TEXT_MAX = 400; // layout, px
-const HOLD = 1400, FADE = 220, IDLE_QUIT = 30 * 60_000; // ms
+const HOLD = 1400, FADE = 220, IDLE_QUIT = Number(process.env.HEADSUP_IDLE_MIN ?? 30) * 60_000; // ms; HEADSUP_IDLE_MIN=0 keeps the daemon alive forever
 const LEAD = 0.25, HOP = 240, VOICED = 0.01; // word reveal lead (s); 10 ms hop at 24 kHz; RMS above this counts as voice
 
 const cv = document.getElementById('c');
@@ -87,7 +87,7 @@ net.createServer((sock) => {
   sock.on('close', () => { u.ended = true; }); // finished or aborted: no more data either way
   sock.on('error', () => {});
 }).listen(PIPE);
-setInterval(() => { if (!cur && !queue.length && Date.now() - lastActive > IDLE_QUIT) ipcRenderer.send('quit'); }, 15_000);
+setInterval(() => { if (IDLE_QUIT > 0 && !cur && !queue.length && Date.now() - lastActive > IDLE_QUIT) ipcRenderer.send('quit'); }, 15_000);
 
 // ---- text layout: greedy word wrap, measured once per transcript change
 function layout(u) {
