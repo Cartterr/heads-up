@@ -29,4 +29,9 @@ ipcMain.on('show', () => {
 });
 ipcMain.on('hide', () => win.hide());
 ipcMain.on('quit', () => app.quit());
-ipcMain.on('snap', async (_e, file) => writeFileSync(file, (await win.webContents.capturePage()).toPNG())); // HEADSUP_DEBUG_DIR only
+let snapping = false; // frames arriving while a capture is in flight are dropped
+ipcMain.on('snap', async (_e, file) => { // HEADSUP_DEBUG_DIR / HEADSUP_RECORD_DIR only
+  if (snapping) return;
+  snapping = true;
+  try { writeFileSync(file, (await win.webContents.capturePage()).toPNG()); } finally { snapping = false; }
+});

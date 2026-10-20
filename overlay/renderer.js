@@ -10,6 +10,7 @@ const { align } = require('./align.cjs');
 
 const PIPE = process.env.HEADSUP_PIPE;
 const DEBUG = process.env.HEADSUP_DEBUG_DIR; // set it to get notch.png + stats.json (measured fps) written there
+const RECORD = process.env.HEADSUP_RECORD_DIR; // set it to dump timestamped frames (used to make the README GIFs)
 const W = 760, H = 300, CX = W / 2;
 const FONT = '500 17px "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif';
 const LH = 24, PADX = 24, PADY = 13, BARS = 52, TEXT_MAX = 400; // layout, px
@@ -151,7 +152,10 @@ function notchPath(w, h) {
 let level = 0;
 function draw(now) {
   g.clearRect(0, 0, W, H);
-  if (DEBUG) { g.fillStyle = '#6f8fb0'; g.fillRect(0, 0, W, H); } // so the black notch is visible in the debug PNG
+  if (RECORD) { // a dark gradient so the black notch reads in a recording
+    const bg = g.createLinearGradient(0, 0, W, 0); bg.addColorStop(0, '#2b1055'); bg.addColorStop(1, '#0f4c81');
+    g.fillStyle = bg; g.fillRect(0, 0, W, H);
+  } else if (DEBUG) { g.fillStyle = '#6f8fb0'; g.fillRect(0, 0, W, H); } // so the black notch is visible in the debug PNG
   const w = sw.v, h = sh.v;
   if (h < 0.5) return;
   const L = notchPath(w, h);
@@ -181,7 +185,7 @@ function draw(now) {
 }
 
 // ---- frame loop
-let running = false, last = 0, dts = [];
+let running = false, last = 0, dts = [], lastRec;
 function wake() {
   lastActive = Date.now();
   if (running) return;
@@ -226,6 +230,7 @@ function frame(now) {
   }
   level += (lvl - level) * (1 - Math.exp(-dt * (lvl > level ? 45 : 10))); // fast attack, slower release
   draw(now);
+  if (RECORD && now - (lastRec ?? -1e9) >= 33) { lastRec = now; ipcRenderer.send('snap', path.join(RECORD, 'f_' + Date.now() + '.png')); }
 
   if (DEBUG && cur && cur.allShown && !cur.snapped && Math.abs(sh.v - sh.t) < 0.5 && Math.abs(sw.v - sw.t) < 0.5) {
     cur.settledAt ??= now;
