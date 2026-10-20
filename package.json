@@ -1,0 +1,16 @@
+{
+  "name": "heads-up",
+  "version": "0.1.0",
+  "description": "Make any AI agent talk to you out loud (OpenAI Realtime voice) with a buttery OLED-style notch that shows what it says.",
+  "type": "module",
+  "bin": { "heads-up": "src/cli.mjs" },
+  "files": ["src", "overlay"],
+  "scripts": { "test": "node test/smoke.mjs" },
+  "engines": { "node": ">=22" },
+  "optionalDependencies": { "electron": "^44.9.1" },
+  "keywords": ["ai", "agent", "tts", "voice", "realtime", "openai", "notch", "overlay", "claude-code", "codex"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/Cartterr/heads-up.git" },
+  "homepage": "https://github.com/Cartterr/heads-up#readme"
+}
+

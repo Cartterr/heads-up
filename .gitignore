@@ -1,0 +1,10 @@
+node_modules/
+*.log
+npm.out
+npm.err
+# never commit secrets
+.env
+.env.*
+*.key
+key
+openaikey*
