@@ -17,7 +17,7 @@ const tryConnect = () => new Promise((res) => {
 });
 
 /** Connects to the overlay daemon, starting it if needed. Resolves null when Electron isn't installed or can't start. */
-export async function openNotch({ start = true } = {}) {
+export async function openNotch({ start = true, waitMs = 8000 } = {}) {
   let sock = await tryConnect();
   if (!sock && start) {
     let exe;
@@ -25,7 +25,7 @@ export async function openNotch({ start = true } = {}) {
     const env = { ...process.env, HEADSUP_PIPE: PIPE };
     delete env.ELECTRON_RUN_AS_NODE; // set when launched from an Electron host; would turn the overlay into plain Node
     spawn(exe, [MAIN], { detached: true, stdio: 'ignore', env, windowsHide: true }).unref();
-    for (let i = 0; i < 160 && !sock; i++) { // up to 8 s for first boot
+    for (let i = 0; i < waitMs / 50 && !sock; i++) { // 8 s by default; --start waits longer, a cold boot can be slow
       await new Promise((r) => setTimeout(r, 50));
       sock = await tryConnect();
     }

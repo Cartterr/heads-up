@@ -65,6 +65,7 @@ let cur = null, lastActive = Date.now();
 
 function onMsg(u, m) {
   if (m.type === 'quit') return ipcRenderer.send('quit');
+  if (m.type === 'reset') return ipcRenderer.send('rebuild');
   if (!u.queued) { u.queued = true; queue.push(u); pump(); }
   if (m.type === 'audio') u.chunks.push(m.b64);
   else if (m.type === 'text') { u.text += m.delta; u.dirty = true; }
@@ -75,7 +76,7 @@ function pump() {
   if (!cur && queue.length) { cur = queue.shift(); wake(); }
 }
 if (process.platform !== 'win32') { try { fs.unlinkSync(PIPE); } catch { /* no stale socket */ } }
-net.createServer((sock) => {
+const server = net.createServer((sock) => {
   const u = { sock, queued: false, text: '', chunks: [], ended: false, audioDur: 0, playStart: null, nextT: 0, finished: false,
     dirty: true, words: [], pos: [], cum: [], shownAt: [], nLines: 1, textW: 0, hops: [], samples: 0, shown: 0, wordT: null, pcm: [] };
   let buf = '';
@@ -86,7 +87,10 @@ net.createServer((sock) => {
   });
   sock.on('close', () => { u.ended = true; }); // finished or aborted: no more data either way
   sock.on('error', () => {});
-}).listen(PIPE);
+});
+server.on('error', (e) => { if (e.code === 'EADDRINUSE') setTimeout(() => server.listen(PIPE), 300); }); // after a window rebuild the old renderer may still hold the pipe for a moment
+server.listen(PIPE);
+
 setInterval(() => { if (IDLE_QUIT > 0 && !cur && !queue.length && Date.now() - lastActive > IDLE_QUIT) ipcRenderer.send('quit'); }, 15_000);
 
 // ---- text layout: greedy word wrap, measured once per transcript change

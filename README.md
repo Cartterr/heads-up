@@ -111,7 +111,8 @@ window, and **zero API tokens**. Only speaking is billed. Start it at logon so t
 ```powershell
 # Windows: a hidden logon task (adjust the paths)
 $a = New-ScheduledTaskAction -Execute (Get-Command node).Source -Argument '"C:path	oheads-upsrccli.mjs" --start'
-Register-ScheduledTask -TaskName 'heads-up overlay' -Action $a -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME) `
+$t = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME; $t.Delay = 'PT30S'   # let displays settle first
+Register-ScheduledTask -TaskName 'heads-up overlay' -Action $a -Trigger $t `
   -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden) -RunLevel Limited
 ```
 
@@ -131,6 +132,7 @@ heads-up "<what to say>"
   --persona "<text>"  replace the system prompt (env HEADSUP_PERSONA)
   --start             start the overlay daemon now (kept alive until --stop) and exit; run it at logon
   --session "<title>"  which session/agent is speaking, so the voice can tell them apart (env HEADSUP_SESSION)
+  --restart           rebuild the overlay window (if the notch ever stops drawing)
   --stop              close the overlay daemon
 ```
 
@@ -191,6 +193,9 @@ nickname-shortens titles and names the session only when it changes. Delete the 
 
 - **Nothing plays:** check `~/.heads-up/heads-up.log`.
 - **Measure the frame rate:** set `HEADSUP_DEBUG_DIR=<dir>` and speak once. It writes `notch.png` and `stats.json`.
+- **Voice plays but no notch:** run `heads-up --restart`. The daemon also rebuilds its window by itself when your
+  displays change and once shortly after boot, because a transparent window created while displays are still
+  initialising can end up visible but never painted.
 - **Slow the first time:** Electron is downloading. Run any `heads-up --wait "test"` once.
 - **Make your own GIFs:** set `HEADSUP_RECORD_DIR=<dir>` to dump timestamped frames, then stitch them with ffmpeg.
 
